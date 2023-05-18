@@ -19,7 +19,7 @@ module meadow::private_sale {
     const EInsufficientPaymentSent: u64 = 4;
     const EUserDataAlreadyCreated : u64 = 5;
 
-    const WITHDRAW_FUNDS_WALLET : address = @0x4b42d83ac73290815e32f883fcd7ec7f34e02bbdd80164bc98901fa3e53474bd;
+    const WITHDRAW_FUNDS_WALLET : address = @0x6614278c2154857cdd7a08ca84f35bcee4f9d7571d3e3060ffecf9fed1c401e4;
 
 
     // Events
@@ -40,7 +40,8 @@ module meadow::private_sale {
     struct RewardsCalculated has copy, drop {
         wallet: address,
         tokens: u64,
-        bonus: u64
+        bonus: u64,
+        refundableSui: u64
     }
 
     struct FundsWithdrawn has copy, drop {
@@ -50,7 +51,6 @@ module meadow::private_sale {
 
     // Scaling constants
     const TOKEN_UPSCALING_FACTOR: u64 = 1000000000;
-    const TOKEN_UPSCALING_FACTOR_BIG_UINT: u256 = 1000000000;
 
     /// The one of a kind - created in the module initializer.
     struct ICOOperatorCapability has key {
@@ -65,8 +65,8 @@ module meadow::private_sale {
         suiPerToken: u64,
         totalTokensForSale: u64,
         totalSuiDeposited: Balance<SUI>,
-        amountToBeRaisedUsd: u64,
-        actualAmountRaisedUsd: u64,
+        amountToBeRaisedSui: u64,
+        actualAmountRaisedSui: u64,
         minimumContributionSui: u64,
         isPresaleActive: bool,
         whitelistedAddresses: vector<address>,
@@ -75,49 +75,6 @@ module meadow::private_sale {
         bonusDepositPool: u64,
         testTotalSuiDeposited: u64,
     }
-
-
-    struct UserData has key {
-      id: UID,
-      wallet: address,
-      investedSui: u64,
-      tokensBalance: u64,
-      refundableSui: u64,
-      calculatedTokensReward: u64,
-      calculatedBonusReward: u64,
-    }
-
-
-    public entry fun get_sui_balance(
-      user: &mut UserData,
-    ): u64 {
-      user.investedSui
-    }
-
-    public entry fun get_tokens_balance(
-      user: &mut UserData,
-    ): u64 {
-      user.tokensBalance
-    }
-
-    public entry fun get_refundable_sui(
-      user: &mut UserData,
-    ): u64 {
-      user.refundableSui
-    }
-
-    public entry fun get_calculated_tokens_reward(
-      user: &mut UserData,
-    ): u64 {
-      user.calculatedTokensReward
-    }
-
-    public entry fun get_calculated_bonus_reward(
-      user: &mut UserData,
-    ): u64 {
-      user.calculatedBonusReward
-    }
-
 
     /// Getter functions for the `PresaleData` object
   
@@ -145,16 +102,16 @@ module meadow::private_sale {
       data.totalTokensForSale
     }
 
-    public entry fun get_amount_to_be_raised_usd(
+    public entry fun get_amount_to_be_raised_sui(
       data: &mut PresaleData,
     ): u64 {
-      data.amountToBeRaisedUsd
+      data.amountToBeRaisedSui
     }
 
-    public entry fun get_actual_amount_raised_usd(
+    public entry fun get_actual_amount_raised_sui(
       data: &mut PresaleData,
     ): u64 {
-      data.actualAmountRaisedUsd
+      data.actualAmountRaisedSui
     }
 
     public entry fun get_minimum_contribution_sui(
@@ -194,6 +151,43 @@ module meadow::private_sale {
       data.bonusDepositPool
     }
 
+
+    struct UserData has key {
+      id: UID,
+      wallet: address,
+      investedSui: u64,
+      refundableSui: u64,
+      calculatedTokensReward: u64,
+      calculatedBonusReward: u64,
+    }
+
+
+    public entry fun get_sui_balance(
+      user: &mut UserData,
+    ): u64 {
+      user.investedSui
+    }
+
+    public entry fun get_refundable_sui(
+      user: &mut UserData,
+    ): u64 {
+      user.refundableSui
+    }
+
+    public entry fun get_calculated_tokens_reward(
+      user: &mut UserData,
+    ): u64 {
+      user.calculatedTokensReward
+    }
+
+    public entry fun get_calculated_bonus_reward(
+      user: &mut UserData,
+    ): u64 {
+      user.calculatedBonusReward
+    }
+
+
+    
     /// This function is only called once on module publish.
     /// Use it to make sure something has happened only once, like
     /// here - only module author will own a version of a
@@ -208,14 +202,14 @@ module meadow::private_sale {
 
         transfer::share_object(PresaleData {
           id: object::new(ctx),
-          icoStartTimestamp: 0,
+          icoStartTimestamp: 1684420821 * 1000,
           icoEndTimestamp: 1984276317 * 1000,
           suiPerToken: 1000000, // for testing we're using a scale of 1,000,000,000
           totalTokensForSale: 1450000000 * TOKEN_UPSCALING_FACTOR,
           totalSuiDeposited: balance::zero(),
-          amountToBeRaisedUsd: 1450000,
-          actualAmountRaisedUsd: 0,
-          minimumContributionSui: 1,
+          amountToBeRaisedSui: 1450000 * TOKEN_UPSCALING_FACTOR,
+          actualAmountRaisedSui: 0,
+          minimumContributionSui: 100000000,
           isPresaleActive: true,
           whitelistedAddresses: vec::empty(),
           contributors: vec::empty(),
@@ -271,14 +265,13 @@ module meadow::private_sale {
       ctx: &mut TxContext,
     ) {
 
-      assert!(vec::contains(&data.whitelistedAddresses, &tx_context::sender(ctx)) == false, EUserDataAlreadyCreated);
+      assert!(vec::contains(&data.contributors, &tx_context::sender(ctx)) == false, EUserDataAlreadyCreated);
       vec::push_back(&mut data.contributors, tx_context::sender(ctx));
 
       transfer::transfer(UserData {
         id: object::new(ctx),
         wallet: wallet,
         investedSui: 0,
-        tokensBalance: 0,
         refundableSui: 0,
         calculatedTokensReward: 0,
         calculatedBonusReward: 0,
@@ -294,28 +287,49 @@ module meadow::private_sale {
       ctx: &mut TxContext,
     ) {
 
+
       let currentTimestamp = clock::timestamp_ms(clock);
 
       // Make the necessary checks
       assert!(coin::value(payment) > data.minimumContributionSui, EInsufficientPaymentSent);
       assert!(currentTimestamp >= data.icoStartTimestamp, EPresaleNotStarted);
       assert!(currentTimestamp <= data.icoEndTimestamp, EPresaleEnded);
+      assert!(data.isPresaleActive == true, EPresaleEnded);
 
       let sui_balance = coin::balance_mut(payment);
       let payment = balance::split(sui_balance, amount);
 
       user.investedSui = user.investedSui + balance::value(&payment);
 
-      let purchaseUsdValue = balance::value(&payment) * data.suiPerToken;
+      let purchaseSuiValue = balance::value(&payment);
 
       event::emit(SuiContributionRecieved { wallet: tx_context::sender(ctx), amount: balance::value(&payment) });
 
       // Transfer the SUI to the contract
       balance::join(&mut data.totalSuiDeposited, payment);
 
-      data.actualAmountRaisedUsd = data.actualAmountRaisedUsd + purchaseUsdValue / TOKEN_UPSCALING_FACTOR * 2;
+      data.actualAmountRaisedSui = data.actualAmountRaisedSui + purchaseSuiValue;
 
     }
+
+    #[test_only]
+    public entry fun test_purchase_tokens(
+      data: &mut PresaleData,
+      user: &mut UserData,
+      amount: u64,
+    ) {
+
+      user.investedSui = user.investedSui + amount;
+
+      let purchaseSuiValue = amount;
+
+      // Transfer the SUI to the contract
+      data.testTotalSuiDeposited = data.testTotalSuiDeposited + amount;
+      data.actualAmountRaisedSui = data.actualAmountRaisedSui + purchaseSuiValue;
+
+    }
+
+    /// The user can check how many rewards they are elligible for considering the current pool 
 
     public entry fun calculate_elligible_rewards(
       data: &mut PresaleData,
@@ -323,30 +337,24 @@ module meadow::private_sale {
       ctx: &mut TxContext,
     ) {
 
-      //TODO: Only calculate after presale has ended
-
-
       let reward = calculate_reward(
         user.investedSui,
         data.totalTokensForSale,
-        data.actualAmountRaisedUsd,
+        data.actualAmountRaisedSui,
       );
 
-      let refundableTokens =
+      let refundableSuiAmount =
         calculate_refundable_reward(
           user.investedSui,
           data.suiPerToken,
           data.totalTokensForSale,
-          data.actualAmountRaisedUsd,
+          data.actualAmountRaisedSui,
         );
       
 
       let isUserWhitelisted = get_is_whitelisted(data, tx_context::sender(ctx));
 
       if(isUserWhitelisted) {
-
-        // For testing, use line 353 instead of 354
-        // For devnet deployment, use line 354 instead of 353
 
         user.calculatedBonusReward = calculate_bonus_reward(
           user.investedSui,
@@ -357,30 +365,28 @@ module meadow::private_sale {
 
       };
 
-      // Consume all the user's invested sui
-      user.investedSui = 0;
+      // Set the refundable sui in the user's struct
+      user.refundableSui = refundableSuiAmount;
 
-      // Transfer the tokens to the user
-      user.tokensBalance = user.tokensBalance + reward;
-
-      // Transfer the refundable tokens to the user
-      user.refundableSui = user.refundableSui + refundableTokens;
-
-      // Set the values in the user's struct
+      // Set the reward in the user's struct
       user.calculatedTokensReward = reward;
 
-      event::emit(RewardsCalculated { wallet: tx_context::sender(ctx), tokens: reward, bonus: user.calculatedBonusReward });
+      event::emit(RewardsCalculated { wallet: tx_context::sender(ctx), tokens: reward, bonus: user.calculatedBonusReward, refundableSui: refundableSuiAmount });
     }
 
     fun calculate_reward(
       suiIn: u64,
       totalTokensForSale: u64,
-      actualAmountRaisedUsd: u64,
+      actualAmountRaisedSui: u64,
     ): u64 {
-      let shareFromInvestmentPool = suiIn * 10000 / actualAmountRaisedUsd;
+
+      let shareFromInvestmentPool = suiIn * 10000000 / actualAmountRaisedSui;
       let claimableTokens = shareFromInvestmentPool * (totalTokensForSale / TOKEN_UPSCALING_FACTOR);
-      let claimableTokensDownscaled = claimableTokens / 10000;
-      claimableTokensDownscaled
+      let claimableTokensDownscaled = claimableTokens / 10000000;
+
+      let claimableTokensScaledToSuiDecimals = claimableTokensDownscaled * TOKEN_UPSCALING_FACTOR;
+
+      claimableTokensScaledToSuiDecimals
     }
 
 
@@ -388,15 +394,28 @@ module meadow::private_sale {
       suiIn: u64,
       suiPerToken: u64,
       totalTokensForSale: u64,
-      actualAmountRaisedUsd: u64,
+      actualAmountRaisedSui: u64,
     ): u64 {
 
-      let shareFromInvestmentPool = suiIn * 10000 / actualAmountRaisedUsd;
-      let claimableTokens = shareFromInvestmentPool * (totalTokensForSale / TOKEN_UPSCALING_FACTOR);
-      let claimableTokensDownscaled = claimableTokens / 10000 / TOKEN_UPSCALING_FACTOR;
-      let tokensValueInSui = (claimableTokensDownscaled * suiPerToken);
-      let refundableTokens = (suiIn - tokensValueInSui);
-      refundableTokens
+
+      let tokens_reward = calculate_reward(
+        suiIn,
+        totalTokensForSale,
+        actualAmountRaisedSui,
+      );
+
+      let _refundableTokens = 0;
+    
+      let tokensValueInSui = (tokens_reward / 1000000 * suiPerToken) / TOKEN_UPSCALING_FACTOR * 1000000;
+
+      if (tokensValueInSui > suiIn) {
+        _refundableTokens = 0;
+      } else {
+        _refundableTokens = (suiIn - tokensValueInSui);
+      };
+
+      _refundableTokens
+      
     }
 
     fun calculate_bonus_reward(
@@ -413,7 +432,6 @@ module meadow::private_sale {
     }
 
     public entry fun withdraw_funds(
-      _: &ICOOperatorCapability,
       data: &mut PresaleData,
       ctx: &mut TxContext,
     ) {
@@ -423,326 +441,674 @@ module meadow::private_sale {
       event::emit(FundsWithdrawn { wallet: WITHDRAW_FUNDS_WALLET, amount: amount });
     }
 
-    #[test_only]
-    public fun init_for_testing(ctx: &mut TxContext) {
-        init(ctx);
-    }
+    // #[test_only]
+    // public fun init_for_testing(ctx: &mut TxContext) {
+    //     init(ctx);
+    // }
 
-    #[test_only]
-    public fun set_actual_amount_raised(
-      data: &mut PresaleData,
-      amount: u64,
-    ) {
-        data.actualAmountRaisedUsd = amount;
-    }
-
-    #[test_only]
-    public entry fun test_purchase_tokens(
-      data: &mut PresaleData,
-      user: &mut UserData,
-      amount: u64,
-    ) {
-
-      user.investedSui = user.investedSui + amount;
-
-      let purchaseUsdValue = amount * data.suiPerToken / TOKEN_UPSCALING_FACTOR * 2;
-
-      // Transfer the SUI to the contract
-      data.testTotalSuiDeposited = data.testTotalSuiDeposited + amount;
-      data.actualAmountRaisedUsd = data.actualAmountRaisedUsd + purchaseUsdValue;
-
-    }
+    // #[test_only]
+    // public fun set_actual_amount_raised(
+    //   data: &mut PresaleData,
+    //   amount: u64,
+    // ) {
+    //     data.actualAmountRaisedSui = amount;
+    // }
 
 }
 
-#[test_only]
-module meadow::private_sale_test {
+// #[test_only]
+// module aurora::auroraIcoTest {
 
-  use sui::test_scenario::{Self, Scenario};
-  // use sui::coin::{Self, Coin};
-  // use sui::balance::{Self, Balance};
-  // use sui::sui::SUI;
-  use meadow::private_sale::{Self, PresaleData, UserData, ICOOperatorCapability };
-  use sui::clock::{Self};
-  // use std::debug;
-  // use std::vector as vec;
-  // use sui::transfer;
+//   use sui::test_scenario::{Self, Scenario};
+//   // use sui::coin::{Self, Coin};
+//   // use sui::balance::{Self, Balance};
+//   // use sui::sui::SUI;
+//   use aurora::auroraIco::{Self, PresaleData, UserData, ICOOperatorCapability };
+//   use sui::clock::{Self};
+//   // use std::debug;
+//   // use std::vector as vec;
+//   // use sui::transfer;
 
-  const TOKEN_UPSCALING_FACTOR: u64 = 1000000000;
-  const HIDE_DEBUG_MESSAGES: bool = false;
+//   const TOKEN_UPSCALING_FACTOR: u64 = 1000000000;
+//   const HIDE_DEBUG_MESSAGES: bool = false;
 
-  fun initialize_user_data(scenario: &mut Scenario, user: address) {
-    // User1 initializes their user object
-    test_scenario::next_tx(scenario, user);
-    {
-      let data_val = test_scenario::take_shared<PresaleData>(scenario);
-      let data = &mut data_val;
-      let ctx = test_scenario::ctx(scenario);
+//   fun initialize_user_data(scenario: &mut Scenario, user: address) {
+//     // User1 initializes their user object
+//     test_scenario::next_tx(scenario, user);
+//     {
+//       let data_val = test_scenario::take_shared<PresaleData>(scenario);
+//       let data = &mut data_val;
+//       let ctx = test_scenario::ctx(scenario);
 
-      // Attempt to create user object firstf
+//       // Attempt to create user object firstf
 
-      private_sale::create_user_data(data, user, ctx);
+//       auroraIco::create_user_data(data, user, ctx);
 
-      test_scenario::return_shared(data_val);
-    };
-  }
+//       test_scenario::return_shared(data_val);
+//     };
+//   }
 
-  fun add_single_wallet_to_whitelist(scenario: &mut Scenario, user: address, wallet: address) {
-   // Attempt to add a single user to the whitelist
-  test_scenario::next_tx(scenario, user);
-  {
+//   fun add_single_wallet_to_whitelist(scenario: &mut Scenario, user: address, wallet: address) {
+//    // Attempt to add a single user to the whitelist
+//   test_scenario::next_tx(scenario, user);
+//   {
 
-    let data_val = test_scenario::take_shared<PresaleData>(scenario);
-    let data = &mut data_val;
+//     let data_val = test_scenario::take_shared<PresaleData>(scenario);
+//     let data = &mut data_val;
 
 
-    let presale_owner_cap_val = test_scenario::take_from_sender<ICOOperatorCapability>(scenario);
-    let presale_owner_cap = &mut presale_owner_cap_val;
+//     let presale_owner_cap_val = test_scenario::take_from_sender<ICOOperatorCapability>(scenario);
+//     let presale_owner_cap = &mut presale_owner_cap_val;
 
-    private_sale::add_single_whitelist_entry(
-      presale_owner_cap,
-      data,
-      wallet,
-    );
+//     auroraIco::add_single_whitelist_entry(
+//       presale_owner_cap,
+//       data,
+//       wallet,
+//     );
 
-    test_scenario::return_to_sender(scenario, presale_owner_cap_val);
-    test_scenario::return_shared(data_val);
-  };
-  }
+//     test_scenario::return_to_sender(scenario, presale_owner_cap_val);
+//     test_scenario::return_shared(data_val);
+//   };
+//   }
 
-  fun buy_tokens(scenario: &mut Scenario, user: address, amount: u64) {
-    test_scenario::next_tx(scenario, user);
-    {
-      let data_val = test_scenario::take_shared<PresaleData>(scenario);
-      let data = &mut data_val;
-      let userData = test_scenario::take_from_sender<UserData>(scenario);
-      let userDataMutable = &mut userData;
+//   fun buy_tokens(scenario: &mut Scenario, user: address, amount: u64) {
+//     test_scenario::next_tx(scenario, user);
+//     {
+//       let data_val = test_scenario::take_shared<PresaleData>(scenario);
+//       let data = &mut data_val;
+//       let userData = test_scenario::take_from_sender<UserData>(scenario);
+//       let userDataMutable = &mut userData;
 
-      // Purchase tokens
+//       // Purchase tokens
 
-      private_sale::test_purchase_tokens(
-        data, 
-        userDataMutable, 
-        amount,
-      );
+//       auroraIco::test_purchase_tokens(
+//         data, 
+//         userDataMutable, 
+//         amount,
+//       );
 
-      // assert!(balance::value(&settings.suiBalance) == 10, 0);
+//       // assert!(balance::value(&settings.suiBalance) == 10, 0);
 
-      test_scenario::return_to_sender(scenario, userData);
-      test_scenario::return_shared(data_val);
-    };
-  }
+//       test_scenario::return_to_sender(scenario, userData);
+//       test_scenario::return_shared(data_val);
+//     };
+//   }
 
-  fun set_actual_amount_raised(scenario: &mut Scenario, user: address, amount: u64) {
-    test_scenario::next_tx(scenario, user);
-    {
-      let data_val = test_scenario::take_shared<PresaleData>(scenario);
-      let data = &mut data_val;
+//   fun set_actual_amount_raised(scenario: &mut Scenario, user: address, amount: u64) {
+//     test_scenario::next_tx(scenario, user);
+//     {
+//       let data_val = test_scenario::take_shared<PresaleData>(scenario);
+//       let data = &mut data_val;
 
-      private_sale::set_actual_amount_raised(
-        data,
-        amount,
-      );
+//       auroraIco::set_actual_amount_raised(
+//         data,
+//         amount,
+//       );
 
-      let amountRaised = private_sale::get_actual_amount_raised_usd(data);
-      assert!(amountRaised == amount, 0);
+//       let amountRaised = auroraIco::get_actual_amount_raised_sui(data);
+//       assert!(amountRaised == amount, 0);
 
-      test_scenario::return_shared(data_val);
-    };
-  }
+//       test_scenario::return_shared(data_val);
+//     };
+//   }
 
-  fun calculate_user_reward(scenario: &mut Scenario, user: address) {
-    test_scenario::next_tx(scenario, user);
-    {
-      let data_val = test_scenario::take_shared<PresaleData>(scenario);
-      let data = &mut data_val;
-      let userData = test_scenario::take_from_sender<UserData>(scenario);
-      let userDataMutable = &mut userData;
+//   fun calculate_user_reward(scenario: &mut Scenario, user: address) {
+//     test_scenario::next_tx(scenario, user);
+//     {
+//       let data_val = test_scenario::take_shared<PresaleData>(scenario);
+//       let data = &mut data_val;
+//       let userData = test_scenario::take_from_sender<UserData>(scenario);
+//       let userDataMutable = &mut userData;
 
-      // Purchase tokens
+//       // Purchase tokens
 
-      let ctx = test_scenario::ctx(scenario);
-      private_sale::calculate_elligible_rewards(
-        data, 
-        userDataMutable, 
-        ctx,
-      );
+//       let ctx = test_scenario::ctx(scenario);
+//       auroraIco::calculate_elligible_rewards(
+//         data, 
+//         userDataMutable, 
+//         ctx,
+//       );
 
-      // assert!(balance::value(&settings.suiBalance) == 10, 0);
+//       // assert!(balance::value(&settings.suiBalance) == 10, 0);
 
-      test_scenario::return_to_sender(scenario, userData);
-      test_scenario::return_shared(data_val);
-    };
-  }
+//       test_scenario::return_to_sender(scenario, userData);
+//       test_scenario::return_shared(data_val);
+//     };
+//   }
 
-  fun init_contract_for_resting(scenario: &mut Scenario, user: address) {
-    test_scenario::next_tx(scenario, user);
-    {
-      private_sale::init_for_testing(test_scenario::ctx(scenario));
-    };
-  }
+//   fun init_contract_for_resting(scenario: &mut Scenario, user: address) {
+//     test_scenario::next_tx(scenario, user);
+//     {
+//       auroraIco::init_for_testing(test_scenario::ctx(scenario));
+//     };
+//   }
 
-  fun assert_user_sui_balance(scenario: &mut Scenario, user: address, amount: u64) {
-    test_scenario::next_tx(scenario, user ); 
-    {
-      let userData = test_scenario::take_from_sender<UserData>(scenario);
-      let userDataMutable = &mut userData;
+//   fun assert_user_sui_balance(scenario: &mut Scenario, user: address, amount: u64) {
+//     test_scenario::next_tx(scenario, user ); 
+//     {
+//       let userData = test_scenario::take_from_sender<UserData>(scenario);
+//       let userDataMutable = &mut userData;
 
-      if(!HIDE_DEBUG_MESSAGES) {
-        std::debug::print(&111111);
-        std::debug::print(&private_sale::get_refundable_sui(userDataMutable));
-      };
+//       if(!HIDE_DEBUG_MESSAGES) {
+//         std::debug::print(&111111);
+//         std::debug::print(&auroraIco::get_refundable_sui(userDataMutable));
+//       };
       
 
-      assert!(private_sale::get_refundable_sui(userDataMutable) == amount, 0);
+//       assert!(auroraIco::get_refundable_sui(userDataMutable) == amount, 0);
 
 
-      test_scenario::return_to_sender(scenario, userData);
-    };
-  }
+//       test_scenario::return_to_sender(scenario, userData);
+//     };
+//   }
 
-  fun assert_user_token_balance(scenario: &mut Scenario, user: address, amount: u64) {
-    test_scenario::next_tx(scenario, user ); 
-    {
-      let userData = test_scenario::take_from_sender<UserData>(scenario);
-      let userDataMutable = &mut userData;
+//   fun assert_user_token_balance(scenario: &mut Scenario, user: address, amount: u64) {
+//     test_scenario::next_tx(scenario, user ); 
+//     {
+//       let userData = test_scenario::take_from_sender<UserData>(scenario);
+//       let userDataMutable = &mut userData;
 
-      if(!HIDE_DEBUG_MESSAGES) {
-        std::debug::print(&222222);
-        std::debug::print(&private_sale::get_calculated_tokens_reward(userDataMutable));
-      };
-      assert!(private_sale::get_calculated_tokens_reward(userDataMutable) == amount, 0);
-
-
-      test_scenario::return_to_sender(scenario, userData);
-    };
-  }
-
-  fun assert_user_bonus_balance(scenario: &mut Scenario, user: address, amount: u64) {
-    test_scenario::next_tx(scenario, user ); 
-    {
-      let userData = test_scenario::take_from_sender<UserData>(scenario);
-      let userDataMutable = &mut userData;
-
-      if(!HIDE_DEBUG_MESSAGES) {
-        std::debug::print(&333333);
-        std::debug::print(&private_sale::get_calculated_bonus_reward(userDataMutable));
-      };
-      assert!(private_sale::get_calculated_bonus_reward(userDataMutable) == amount, 0);
+//       if(!HIDE_DEBUG_MESSAGES) {
+//         std::debug::print(&222222);
+//         std::debug::print(&auroraIco::get_calculated_tokens_reward(userDataMutable));
+//       };
+//       assert!(auroraIco::get_calculated_tokens_reward(userDataMutable) == amount, 0);
 
 
-      test_scenario::return_to_sender(scenario, userData);
-    };
-  }
+//       test_scenario::return_to_sender(scenario, userData);
+//     };
+//   }
+
+//   fun assert_user_bonus_balance(scenario: &mut Scenario, user: address, amount: u64) {
+//     test_scenario::next_tx(scenario, user ); 
+//     {
+//       let userData = test_scenario::take_from_sender<UserData>(scenario);
+//       let userDataMutable = &mut userData;
+
+//       if(!HIDE_DEBUG_MESSAGES) {
+//         std::debug::print(&333333);
+//         std::debug::print(&auroraIco::get_calculated_bonus_reward(userDataMutable));
+//       };
+//       assert!(auroraIco::get_calculated_bonus_reward(userDataMutable) == amount, 0);
+
+
+//       test_scenario::return_to_sender(scenario, userData);
+//     };
+//   }
 
 
 
-  // #[test]
-  // fun scen1_try_purchase_and_verify_invested_count() {
-  //   let user1 = @0x1;
+//   // #[test]
+//   // fun scen1_try_purchase_and_verify_invested_count() {
+//   //   let user1 = @0x1;
 
-  //   let scenario_val = test_scenario::begin(user1);
-  //   let scenario = &mut scenario_val;
-  //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
-
-   
-  //   init_contract_for_resting(scenario, user1);
-
-  //   initialize_user_data(scenario, user1);
-    
-  //   buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
-
-  //   set_actual_amount_raised(scenario, user1, 14500000);
-    
-  //   assert_user_sui_balance(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
-   
-    
-  //   test_scenario::end(scenario_val);
-  //   clock::destroy_for_testing(clock_object);
-  // }
-
-  #[test]
-  fun scen1_try_purchase_and_verify_reward() {
-    let user1 = @0x1;
-
-    let scenario_val = test_scenario::begin(user1);
-    let scenario = &mut scenario_val;
-    let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+//   //   let scenario_val = test_scenario::begin(user1);
+//   //   let scenario = &mut scenario_val;
+//   //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
 
    
-    init_contract_for_resting(scenario, user1);
+//   //   init_contract_for_resting(scenario, user1);
 
-    initialize_user_data(scenario, user1);
-
-    buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
-
-    set_actual_amount_raised(scenario, user1, 14500000);
-
-    calculate_user_reward(scenario, user1);
+//   //   initialize_user_data(scenario, user1);
     
-    assert_user_token_balance(scenario, user1, 99999999940000);
+//   //   buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//   //   set_actual_amount_raised(scenario, user1, 14500000);
+    
+//   //   assert_user_sui_balance(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
    
     
-    test_scenario::end(scenario_val);
-    clock::destroy_for_testing(clock_object);
-  }
+//   //   test_scenario::end(scenario_val);
+//   //   clock::destroy_for_testing(clock_object);
+//   // }
+
+//   #[test]
+//   fun scen0_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 30000000);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_token_balance(scenario, user1, 1450000000000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen1_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 14500000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_token_balance(scenario, user1, 99905000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+//   fun scen1x1_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+//     let user2 = @0x2;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+//     initialize_user_data(scenario, user2);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 14500000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+//     calculate_user_reward(scenario, user2);
+    
+//     assert_user_token_balance(scenario, user1, 49952500000000);
+//     assert_user_token_balance(scenario, user2, 49952500000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
   
-  #[test]
-  fun scen1_try_purchase_and_verify_refunded_sui() {
-    let user1 = @0x1;
+//   #[test]
+//   fun scen1_try_purchase_and_verify_refunded_sui() {
+//     let user1 = @0x1;
 
-    let scenario_val = test_scenario::begin(user1);
-    let scenario = &mut scenario_val;
-    let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
-
-   
-    init_contract_for_resting(scenario, user1);
-
-    initialize_user_data(scenario, user1);
-
-    buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
-
-    set_actual_amount_raised(scenario, user1, 14500000);
-
-    calculate_user_reward(scenario, user1);
-    
-    assert_user_sui_balance(scenario, user1, 900001000000);
-   
-    
-    test_scenario::end(scenario_val);
-    clock::destroy_for_testing(clock_object);
-  }
-
-  #[test]
-  fun scen1_try_purchase_and_verify_bonus_reward() {
-    let user1 = @0x1;
-
-    let scenario_val = test_scenario::begin(user1);
-    let scenario = &mut scenario_val;
-    let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
 
    
-    init_contract_for_resting(scenario, user1);
+//     init_contract_for_resting(scenario, user1);
 
-    initialize_user_data(scenario, user1);
+//     initialize_user_data(scenario, user1);
 
-    add_single_wallet_to_whitelist(scenario, user1, user1);
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
 
-    buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+//     set_actual_amount_raised(scenario, user1, 14500000 * TOKEN_UPSCALING_FACTOR);
 
-    set_actual_amount_raised(scenario, user1, 14500000);
-
-    calculate_user_reward(scenario, user1);
+//     calculate_user_reward(scenario, user1);
     
-    assert_user_bonus_balance(scenario, user1, 1130000000000000);
+//     assert_user_sui_balance(scenario, user1, 900095000000);
    
     
-    test_scenario::end(scenario_val);
-    clock::destroy_for_testing(clock_object);
-  }
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen1_try_purchase_and_verify_bonus_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     add_single_wallet_to_whitelist(scenario, user1, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 14500000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_bonus_balance(scenario, user1, 1130000000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen2_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 2900000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_token_balance(scenario, user1, 499960000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+  
+//   #[test]
+//   fun scen2_try_purchase_and_verify_refunded_sui() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 2900000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_sui_balance(scenario, user1, 500040000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen2_try_purchase_and_verify_bonus_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     add_single_wallet_to_whitelist(scenario, user1, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 2900000 * TOKEN_UPSCALING_FACTOR);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_bonus_balance(scenario, user1, 1130000000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen3_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 1450000);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_token_balance(scenario, user1, 999999999980000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+  
+//   #[test]
+//   fun scen3_try_purchase_and_verify_refunded_sui() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 1450000);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_sui_balance(scenario, user1, 1000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen3_try_purchase_and_verify_bonus_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     add_single_wallet_to_whitelist(scenario, user1, user1);
+
+//     buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//     set_actual_amount_raised(scenario, user1, 1450000);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_bonus_balance(scenario, user1, 1130000000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+
+//   #[test]
+//   fun scen4_try_purchase_and_verify_reward() {
+//     let user1 = @0x1;
+
+//     let scenario_val = test_scenario::begin(user1);
+//     let scenario = &mut scenario_val;
+//     let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//     init_contract_for_resting(scenario, user1);
+
+//     initialize_user_data(scenario, user1);
+
+//     buy_tokens(scenario, user1, 100000000);
+
+//     calculate_user_reward(scenario, user1);
+    
+//     assert_user_token_balance(scenario, user1, 1450000000000000000);
+   
+    
+//     test_scenario::end(scenario_val);
+//     clock::destroy_for_testing(clock_object);
+//   }
+  
+//   // // #[test]
+//   // // fun scen4_try_purchase_and_verify_refunded_sui() {
+//   // //   let user1 = @0x1;
+
+//   // //   let scenario_val = test_scenario::begin(user1);
+//   // //   let scenario = &mut scenario_val;
+//   // //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//   // //   init_contract_for_resting(scenario, user1);
+
+//   // //   initialize_user_data(scenario, user1);
+
+//   // //   buy_tokens(scenario, user1, 100000000);
+
+//   // //   calculate_user_reward(scenario, user1);
+    
+//   // //   assert_user_sui_balance(scenario, user1, 0);
+   
+    
+//   // //   test_scenario::end(scenario_val);
+//   // //   clock::destroy_for_testing(clock_object);
+//   // // }
+
+  
+
+//   // #[test]
+//   // fun bonus_scen1_try_purchase_and_verify_bonus_reward() {
+//   //   let user1 = @0x1;
+
+//   //   let scenario_val = test_scenario::begin(user1);
+//   //   let scenario = &mut scenario_val;
+//   //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//   //   init_contract_for_resting(scenario, user1);
+
+//   //   initialize_user_data(scenario, user1);
+
+//   //   add_single_wallet_to_whitelist(scenario, user1, user1);
+
+//   //   buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//   //   set_actual_amount_raised(scenario, user1, 1450000);
+
+//   //   calculate_user_reward(scenario, user1);
+    
+//   //   assert_user_bonus_balance(scenario, user1, 1130000000000000);
+   
+    
+//   //   test_scenario::end(scenario_val);
+//   //   clock::destroy_for_testing(clock_object);
+//   // }
+
+//   // #[test]
+//   // fun bonus_scen2_try_purchase_and_verify_bonus_reward() {
+//   //   let user1 = @0x1;
+//   //   let user2 = @0x2;
+
+//   //   let scenario_val = test_scenario::begin(user1);
+//   //   let scenario = &mut scenario_val;
+//   //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//   //   init_contract_for_resting(scenario, user1);
+
+//   //   initialize_user_data(scenario, user1);
+//   //   initialize_user_data(scenario, user2);
+
+//   //   add_single_wallet_to_whitelist(scenario, user1, user1);
+//   //   add_single_wallet_to_whitelist(scenario, user1, user2);
+
+//   //   buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+//   //   buy_tokens(scenario, user2, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//   //   set_actual_amount_raised(scenario, user1, 1450000);
+
+//   //   calculate_user_reward(scenario, user1);
+//   //   calculate_user_reward(scenario, user2);
+    
+//   //   assert_user_bonus_balance(scenario, user1, 565000000000000);
+//   //   assert_user_bonus_balance(scenario, user2, 565000000000000);
+   
+    
+//   //   test_scenario::end(scenario_val);
+//   //   clock::destroy_for_testing(clock_object);
+//   // }
+
+//   // #[test]
+//   // fun bonus_scen3_try_purchase_and_verify_bonus_reward() {
+//   //   let user1 = @0x1;
+//   //   let user2 = @0x2;
+//   //   let user3 = @0x3;
+
+//   //   let scenario_val = test_scenario::begin(user1);
+//   //   let scenario = &mut scenario_val;
+//   //   let clock_object = clock::create_for_testing(test_scenario::ctx(scenario));
+
+   
+//   //   init_contract_for_resting(scenario, user1);
+
+//   //   initialize_user_data(scenario, user1);
+//   //   initialize_user_data(scenario, user2);
+//   //   initialize_user_data(scenario, user3);
+
+//   //   add_single_wallet_to_whitelist(scenario, user1, user1);
+//   //   add_single_wallet_to_whitelist(scenario, user1, user2);
+//   //   add_single_wallet_to_whitelist(scenario, user1, user3);
+
+//   //   buy_tokens(scenario, user1, 1000 * TOKEN_UPSCALING_FACTOR);
+//   //   buy_tokens(scenario, user2, 1000 * TOKEN_UPSCALING_FACTOR);
+//   //   buy_tokens(scenario, user3, 1000 * TOKEN_UPSCALING_FACTOR);
+
+//   //   set_actual_amount_raised(scenario, user1, 1450000);
+
+//   //   calculate_user_reward(scenario, user1);
+//   //   calculate_user_reward(scenario, user2);
+//   //   calculate_user_reward(scenario, user3);
+    
+//   //   assert_user_bonus_balance(scenario, user1, 376629000000000);
+//   //   assert_user_bonus_balance(scenario, user2, 376629000000000);
+//   //   assert_user_bonus_balance(scenario, user3, 376629000000000);
+   
+    
+//   //   test_scenario::end(scenario_val);
+//   //   clock::destroy_for_testing(clock_object);
+//   // }
 
 
   
-}
+// }
 
 
