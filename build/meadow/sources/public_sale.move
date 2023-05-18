@@ -1,4 +1,4 @@
-module meadow::private_sale {
+module meadow::public_sale {
     use sui::transfer;
     use sui::object::{Self, UID};
     use sui::sui::SUI;
